@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { AlertTriangle, Info, Zap, Filter } from 'lucide-react';
+import { AlertTriangle, Info, Zap, Filter, CheckCircle2 } from 'lucide-react';
 import { I18nJson } from '@/lib/types';
 import { getTokenWarningLevel, formatNumber, estimateCost } from '@/lib/utils/token-estimator';
 
@@ -32,6 +32,7 @@ function AppContent() {
   const [figmaUrl, setFigmaUrl] = useState<string>('');
   const [openaiKey, setOpenaiKey] = useState<string>('');
   const [figmaToken, setFigmaToken] = useState<string>('');
+  const [localazyFetched, setLocalazyFetched] = useState<boolean>(false);
   const [availablePages, setAvailablePages] = useState<{ id: string; name: string }[]>([]);
   const [selectedPage, setSelectedPage] = useState<string>('');
   const [extractionMode, setExtractionMode] = useState<string>('');
@@ -60,6 +61,37 @@ function AppContent() {
     completionTokens: number;
     totalTokens: number;
   } | null>(null);
+
+  // Fetch files from Localazy
+  const handleFetchFromLocalazy = async () => {
+    setLoading(true);
+    setError('');
+    setStatus('Fetching files from Localazy...');
+
+    try {
+      const response = await fetch('/api/localazy');
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch from Localazy');
+      }
+
+      const data = await response.json();
+
+      // Set the fetched JSON data
+      setEnJson(JSON.stringify(data.data.enJson));
+      setJpJson(JSON.stringify(data.data.jaJson));
+      setLocalazyFetched(true);
+
+      setStatus('Files fetched successfully from Localazy!');
+      setTimeout(() => setStatus(''), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
+      setStatus('');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Step 1: Extract and review texts
   const handleExtractTexts = async () => {
@@ -260,7 +292,7 @@ function AppContent() {
           <div className="flex-1 text-center space-y-2">
             <h1 className="text-4xl font-bold tracking-tight">Figma i18n Key Mapper</h1>
             <p className="text-muted-foreground">
-              Automatically generate i18n keys for Japanese text from Figma designs
+              Follow these 3 simple steps to generate i18n keys from your Figma designs
             </p>
           </div>
           <div className="absolute right-4 top-4">
@@ -268,29 +300,111 @@ function AppContent() {
           </div>
         </div>
 
-        {/* File Uploads */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FileUpload
-            id="en-json"
-            label="English JSON (en.json)"
-            description="Upload your English localization file"
-            onFileContent={(content, _filename) => setEnJson(content)}
-          />
-          <FileUpload
-            id="jp-json"
-            label="Japanese JSON (jp.json)"
-            description="Upload your Japanese localization file"
-            onFileContent={(content, _filename) => setJpJson(content)}
-          />
-        </div>
-
-        {/* Figma Input */}
+        {/* Step 1: Localization Files */}
         <Card>
           <CardHeader>
-            <CardTitle>Figma Configuration</CardTitle>
-            <CardDescription>
-              Enter your Figma file URL (ensure it's shared with "Anyone with the link can view")
-            </CardDescription>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground font-bold">
+                1
+              </div>
+              <div>
+                <CardTitle>Load Localization Files</CardTitle>
+                <CardDescription>
+                  Fetch from Localazy or upload en.json and ja.json manually
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Primary: Fetch from Localazy */}
+            <div className={`p-6 border-2 rounded-lg space-y-3 transition-all ${
+              localazyFetched
+                ? 'border-green-500/50 bg-green-50 dark:bg-green-950/20'
+                : 'border-primary/20 bg-primary/5'
+            }`}>
+              <div className="flex items-center gap-2">
+                {localazyFetched ? (
+                  <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+                ) : (
+                  <Zap className="h-5 w-5 text-primary" />
+                )}
+                <h3 className="font-semibold">
+                  {localazyFetched ? 'Files Loaded Successfully!' : 'Recommended: Fetch from Localazy'}
+                </h3>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {localazyFetched
+                  ? 'en.json and ja.json files have been loaded from Localazy. Ready to proceed!'
+                  : 'Automatically load the latest translations directly from your Localazy project'
+                }
+              </p>
+              {!localazyFetched && (
+                <Button
+                  onClick={handleFetchFromLocalazy}
+                  disabled={loading}
+                  className="w-full"
+                  size="lg"
+                >
+                  <Zap className="h-4 w-4 mr-2" />
+                  {loading ? 'Fetching...' : 'Fetch from Localazy'}
+                </Button>
+              )}
+              {localazyFetched && (
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleFetchFromLocalazy}
+                    disabled={loading}
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    Reload Files
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Divider */}
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground">Or upload files manually</span>
+              </div>
+            </div>
+
+            {/* Secondary: Manual Upload */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <FileUpload
+                id="en-json"
+                label="English JSON (en.json)"
+                description="Upload your English localization file"
+                onFileContent={(content, _filename) => setEnJson(content)}
+              />
+              <FileUpload
+                id="jp-json"
+                label="Japanese JSON (ja.json)"
+                description="Upload your Japanese localization file"
+                onFileContent={(content, _filename) => setJpJson(content)}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Step 2: Figma Configuration */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground font-bold">
+                2
+              </div>
+              <div>
+                <CardTitle>Enter Figma URL & Extract Texts</CardTitle>
+                <CardDescription>
+                  Paste your Figma file URL and extract Japanese texts
+                </CardDescription>
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
