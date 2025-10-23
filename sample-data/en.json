@@ -1,0 +1,19 @@
+{
+  "Welcome": {
+    "title": "Welcome to the App",
+    "subtitle": "Get started with your journey"
+  },
+  "ATT": {
+    "CTA": "Allow Tracking",
+    "desc": "We use tracking to provide you with personalized financial information and great deals.",
+    "skip": "Skip for now",
+    "title": "Enhance your app experience"
+  },
+  "Account": {
+    "Labels": {
+      "bank": {
+        "partners": "Partner Banks"
+      }
+    }
+  }
+}
