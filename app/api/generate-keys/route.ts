@@ -5,7 +5,7 @@ import { FigmaTextNode } from '@/lib/types';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { nodes, contextSample, openaiApiKey, existingKeys } = body;
+    const { nodes, contextSample, openaiApiKey, existingKeys, useNestedKeys } = body;
 
     if (!nodes || !Array.isArray(nodes) || nodes.length === 0) {
       return NextResponse.json(
@@ -37,7 +37,8 @@ export async function POST(request: NextRequest) {
       contextSample,
       apiKey,
       existingKeys || [],
-      10 // batch size
+      10, // batch size
+      useNestedKeys || false // nested keys preference
     );
 
     return NextResponse.json({

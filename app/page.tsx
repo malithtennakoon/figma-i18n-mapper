@@ -9,10 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Skeleton } from '@/components/ui/skeleton';
 import {
   Select,
   SelectContent,
@@ -20,11 +18,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { AlertTriangle, Info, Zap, Filter, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, Info, Zap, Filter, CheckCircle2, ChevronDown, ChevronUp, BadgeCheck, Loader2, X } from 'lucide-react';
 import { I18nJson } from '@/lib/types';
-import { getTokenWarningLevel, formatNumber, estimateCost } from '@/lib/utils/token-estimator';
+import { getTokenWarningLevel, formatNumber, estimateCost, estimateBatchTokens } from '@/lib/utils/token-estimator';
 
 const queryClient = new QueryClient();
+
+// Utility function to extract all keys from nested JSON
+function extractAllKeys(obj: any, prefix = ''): string[] {
+  const keys: string[] = [];
+  for (const key in obj) {
+    const fullKey = prefix ? `${prefix}.${key}` : key;
+    if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
+      keys.push(...extractAllKeys(obj[key], fullKey));
+    } else {
+      keys.push(fullKey);
+    }
+  }
+  return keys;
+}
 
 function AppContent() {
   const [enJson, setEnJson] = useState<string>('');
@@ -38,12 +50,12 @@ function AppContent() {
   const [extractionMode, setExtractionMode] = useState<string>('');
   const [extractedNodeId, setExtractedNodeId] = useState<string | null>(null);
   const [enableSmartFilters, setEnableSmartFilters] = useState<boolean>(true);
+  const [useNestedKeys, setUseNestedKeys] = useState<boolean>(true);
   const [filteringSummary, setFilteringSummary] = useState<string>('');
   const [step, setStep] = useState<'setup' | 'review' | 'generating' | 'complete'>('setup');
   const [extractedTexts, setExtractedTexts] = useState<Array<{ text: string; frameName: string; framePath: string[]; nodeId?: string }>>([]);
   const [loading, setLoading] = useState<boolean>(false);
-  const [progress, setProgress] = useState<number>(0);
-  const [status, setStatus] = useState<string>('');
+  const [loadingStep, setLoadingStep] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [generatedKeys, setGeneratedKeys] = useState<I18nJson | null>(null);
   const [stats, setStats] = useState<{
@@ -61,12 +73,36 @@ function AppContent() {
     completionTokens: number;
     totalTokens: number;
   } | null>(null);
+  const [collapsedSections, setCollapsedSections] = useState<{
+    step1: boolean;
+    step2: boolean;
+    analysisResults: boolean;
+    extractedTexts: boolean;
+    tokenEstimate: boolean;
+    step3: boolean;
+  }>({
+    step1: false,
+    step2: true,
+    analysisResults: false,
+    extractedTexts: false,
+    tokenEstimate: false,
+    step3: true,
+  });
+  const [completedSteps, setCompletedSteps] = useState<{
+    step1: boolean;
+    step2: boolean;
+    step3: boolean;
+  }>({
+    step1: false,
+    step2: false,
+    step3: false,
+  });
 
   // Fetch files from Localazy
   const handleFetchFromLocalazy = async () => {
     setLoading(true);
+    setLoadingStep('localazy');
     setError('');
-    setStatus('Fetching files from Localazy...');
 
     try {
       const response = await fetch('/api/localazy');
@@ -83,13 +119,14 @@ function AppContent() {
       setJpJson(JSON.stringify(data.data.jaJson));
       setLocalazyFetched(true);
 
-      setStatus('Files fetched successfully from Localazy!');
-      setTimeout(() => setStatus(''), 3000);
+      // Mark step 1 as completed and collapse it
+      setCompletedSteps((prev) => ({ ...prev, step1: true }));
+      setCollapsedSections((prev) => ({ ...prev, step1: true, step2: false }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
-      setStatus('');
     } finally {
       setLoading(false);
+      setLoadingStep('');
     }
   };
 
@@ -106,9 +143,8 @@ function AppContent() {
     }
 
     setLoading(true);
+    setLoadingStep('figma');
     setError('');
-    setProgress(10);
-    setStatus('Extracting text from Figma...');
     setStep('setup');
     setGeneratedKeys(null);
     setStats(null);
@@ -137,7 +173,6 @@ function AppContent() {
       }
 
       const figmaData = await figmaResponse.json();
-      setProgress(40);
 
       // Set extraction mode info
       if (figmaData.data.extractionMode) {
@@ -177,25 +212,35 @@ function AppContent() {
         setExtractedTexts(figmaData.data.newTexts);
       }
 
-      setProgress(100);
-
       if (figmaData.data.newNodes === 0) {
-        setStatus('No new Japanese texts found!');
+        setError('No new Japanese texts found!');
         setLoading(false);
+        setLoadingStep('');
         setStep('setup');
         return;
       }
 
       // Move to review step
-      setStatus('Texts extracted! Review and confirm to generate keys.');
       setLoading(false);
+      setLoadingStep('');
       setStep('review');
+
+      // Mark step 2 as completed and auto-collapse/expand sections
+      setCompletedSteps((prev) => ({ ...prev, step2: true }));
+      setCollapsedSections({
+        step1: true,
+        step2: true,
+        analysisResults: false,
+        extractedTexts: false,
+        tokenEstimate: false,
+        step3: false,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
-      setStatus('');
       setStep('setup');
     } finally {
       setLoading(false);
+      setLoadingStep('');
     }
   };
 
@@ -209,33 +254,15 @@ function AppContent() {
     }
 
     setLoading(true);
+    setLoadingStep('generating');
     setError('');
-    setProgress(10);
-    setStatus('Generating i18n keys with AI...');
     setStep('generating');
 
     try {
       // Get context sample and existing keys from jp.json
       const parsedJpJson = typeof jpJson === 'string' ? JSON.parse(jpJson) : jpJson;
       const contextSample = JSON.stringify(parsedJpJson).substring(0, 1000);
-
-      // Extract all existing keys from jp.json to avoid duplicates
-      const extractAllKeys = (obj: any, prefix = ''): string[] => {
-        const keys: string[] = [];
-        for (const key in obj) {
-          const fullKey = prefix ? `${prefix}.${key}` : key;
-          if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
-            keys.push(...extractAllKeys(obj[key], fullKey));
-          } else {
-            keys.push(fullKey);
-          }
-        }
-        return keys;
-      };
-
       const existingKeys = extractAllKeys(parsedJpJson);
-
-      setProgress(50);
 
       const generateResponse = await fetch('/api/generate-keys', {
         method: 'POST',
@@ -245,6 +272,7 @@ function AppContent() {
           contextSample,
           openaiApiKey: openaiKey || undefined, // Optional, uses env if not provided
           existingKeys, // Pass existing keys to avoid duplicates
+          useNestedKeys, // Pass nested keys preference
         }),
       });
 
@@ -254,8 +282,6 @@ function AppContent() {
       }
 
       const generateData = await generateResponse.json();
-      setProgress(100);
-      setStatus('Complete! Keys generated successfully.');
       setGeneratedKeys(generateData.data.generatedKeys);
       setStep('complete');
 
@@ -263,16 +289,55 @@ function AppContent() {
       if (generateData.data.tokenUsage) {
         setActualTokenUsage(generateData.data.tokenUsage);
       }
+
+      // Mark step 3 as completed and keep outputs open
+      setCompletedSteps((prev) => ({ ...prev, step3: true }));
+      setCollapsedSections({
+        step1: true,
+        step2: true,
+        analysisResults: false,
+        extractedTexts: false,
+        tokenEstimate: false,
+        step3: true,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
-      setStatus('');
       setStep('review');
     } finally {
       setLoading(false);
+      setLoadingStep('');
+    }
+  };
+
+  const handleRemoveText = (indexToRemove: number) => {
+    const updatedTexts = extractedTexts.filter((_, index) => index !== indexToRemove);
+    setExtractedTexts(updatedTexts);
+
+    // Update stats to reflect the new count
+    if (stats) {
+      setStats({
+        ...stats,
+        new: updatedTexts.length,
+      });
+    }
+
+    // Recalculate token estimate if we have the necessary data
+    if (tokenEstimate && jpJson && updatedTexts.length > 0) {
+      const parsedJpJson = typeof jpJson === 'string' ? JSON.parse(jpJson) : jpJson;
+      const contextSample = JSON.stringify(parsedJpJson).substring(0, 1000);
+      const existingKeys = extractAllKeys(parsedJpJson);
+      const newTokenEstimate = estimateBatchTokens(
+        updatedTexts as any,
+        contextSample,
+        existingKeys,
+        10
+      );
+      setTokenEstimate(newTokenEstimate);
     }
   };
 
   const handleStartOver = () => {
+    // Reset to setup step, but preserve localization files
     setStep('setup');
     setExtractedTexts([]);
     setStats(null);
@@ -281,7 +346,37 @@ function AppContent() {
     setGeneratedKeys(null);
     setFilteringSummary('');
     setError('');
-    setStatus('');
+
+    // Keep step 1 completed and collapsed if files are loaded
+    // Open step 2 for entering a new Figma URL
+    const hasFiles = Boolean(enJson && jpJson);
+    setCollapsedSections({
+      step1: hasFiles, // Collapse if files are loaded
+      step2: false,     // Open step 2 to enter new Figma URL
+      analysisResults: false,
+      extractedTexts: false,
+      tokenEstimate: false,
+      step3: true,
+    });
+    setCompletedSteps({
+      step1: hasFiles,  // Keep step 1 completed if files are loaded
+      step2: false,
+      step3: false,
+    });
+
+    // Clear Figma URL to allow entering a new one
+    setFigmaUrl('');
+    setAvailablePages([]);
+    setSelectedPage('');
+    setExtractionMode('');
+    setExtractedNodeId(null);
+  };
+
+  const toggleSection = (section: keyof typeof collapsedSections) => {
+    setCollapsedSections((prev) => ({
+      ...prev,
+      [section]: !prev[section],
+    }));
   };
 
   return (
@@ -301,20 +396,39 @@ function AppContent() {
         </div>
 
         {/* Step 1: Localization Files */}
-        <Card>
-          <CardHeader>
+        <Card className={completedSteps.step1 ? 'border-green-500 bg-green-50 dark:bg-green-950/20' : ''}>
+          <CardHeader className="cursor-pointer" onClick={() => toggleSection('step1')}>
             <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground font-bold">
-                1
+              <div className="relative">
+                <div className={`flex items-center justify-center w-10 h-10 rounded-full font-bold ${
+                  completedSteps.step1
+                    ? 'bg-green-500 text-white'
+                    : 'bg-primary text-primary-foreground'
+                }`}>
+                  1
+                </div>
+                {completedSteps.step1 && (
+                  <div className="absolute -top-1 -right-1 bg-white dark:bg-slate-900 rounded-full p-0.5">
+                    <BadgeCheck className="h-4 w-4 text-green-500" />
+                  </div>
+                )}
               </div>
-              <div>
-                <CardTitle>Load Localization Files</CardTitle>
+              <div className="flex-1">
+                <CardTitle className={completedSteps.step1 ? 'text-green-700 dark:text-green-400' : ''}>
+                  Load Localization Files
+                </CardTitle>
                 <CardDescription>
-                  Fetch from Localazy or upload en.json and ja.json manually
+                  Load your existing English and Japanese translation files to compare with new texts from Figma
                 </CardDescription>
               </div>
+              {collapsedSections.step1 ? (
+                <ChevronDown className="h-5 w-5 text-muted-foreground" />
+              ) : (
+                <ChevronUp className="h-5 w-5 text-muted-foreground" />
+              )}
             </div>
           </CardHeader>
+          {!collapsedSections.step1 && (
           <CardContent className="space-y-6">
             {/* Primary: Fetch from Localazy */}
             <div className={`p-6 border-2 rounded-lg space-y-3 transition-all ${
@@ -334,8 +448,8 @@ function AppContent() {
               </div>
               <p className="text-sm text-muted-foreground">
                 {localazyFetched
-                  ? 'en.json and ja.json files have been loaded from Localazy. Ready to proceed!'
-                  : 'Automatically load the latest translations directly from your Localazy project'
+                  ? 'Your translation files have been loaded. Ready to proceed to the next step!'
+                  : 'Instantly sync with your Localazy project to get the most up-to-date translations'
                 }
               </p>
               {!localazyFetched && (
@@ -345,8 +459,17 @@ function AppContent() {
                   className="w-full"
                   size="lg"
                 >
-                  <Zap className="h-4 w-4 mr-2" />
-                  {loading ? 'Fetching...' : 'Fetch from Localazy'}
+                  {loading && loadingStep === 'localazy' ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Fetching from Localazy...
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="h-4 w-4 mr-2" />
+                      Fetch from Localazy
+                    </>
+                  )}
                 </Button>
               )}
               {localazyFetched && (
@@ -389,23 +512,43 @@ function AppContent() {
               />
             </div>
           </CardContent>
+          )}
         </Card>
 
         {/* Step 2: Figma Configuration */}
-        <Card>
-          <CardHeader>
+        <Card className={completedSteps.step2 ? 'border-green-500 bg-green-50 dark:bg-green-950/20' : ''}>
+          <CardHeader className="cursor-pointer" onClick={() => toggleSection('step2')}>
             <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground font-bold">
-                2
+              <div className="relative">
+                <div className={`flex items-center justify-center w-10 h-10 rounded-full font-bold ${
+                  completedSteps.step2
+                    ? 'bg-green-500 text-white'
+                    : 'bg-primary text-primary-foreground'
+                }`}>
+                  2
+                </div>
+                {completedSteps.step2 && (
+                  <div className="absolute -top-1 -right-1 bg-white dark:bg-slate-900 rounded-full p-0.5">
+                    <BadgeCheck className="h-4 w-4 text-green-500" />
+                  </div>
+                )}
               </div>
-              <div>
-                <CardTitle>Enter Figma URL & Extract Texts</CardTitle>
+              <div className="flex-1">
+                <CardTitle className={completedSteps.step2 ? 'text-green-700 dark:text-green-400' : ''}>
+                  Connect Your Figma Design
+                </CardTitle>
                 <CardDescription>
-                  Paste your Figma file URL and extract Japanese texts
+                  Enter your Figma file link to automatically scan and extract all Japanese text from your design
                 </CardDescription>
               </div>
+              {collapsedSections.step2 ? (
+                <ChevronDown className="h-5 w-5 text-muted-foreground" />
+              ) : (
+                <ChevronUp className="h-5 w-5 text-muted-foreground" />
+              )}
             </div>
           </CardHeader>
+          {!collapsedSections.step2 && (
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="figma-url">Figma File URL</Label>
@@ -422,7 +565,7 @@ function AppContent() {
                 }}
               />
               <p className="text-xs text-muted-foreground">
-                Make sure the file is set to &quot;Anyone with the link can view&quot; in Figma sharing settings
+                Tip: Make sure your Figma file sharing is set to &quot;Anyone with the link can view&quot;
               </p>
               {extractionMode === 'node' && extractedNodeId && (
                 <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-md">
@@ -457,127 +600,96 @@ function AppContent() {
               </div>
             )}
 
-            <div className="flex items-start space-x-2 pt-2">
-              <Checkbox
-                id="smart-filters"
-                checked={enableSmartFilters}
-                onCheckedChange={(checked) => setEnableSmartFilters(checked === true)}
-              />
-              <div className="grid gap-1.5 leading-none">
-                <label
-                  htmlFor="smart-filters"
-                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2"
-                >
-                  <Filter className="h-3.5 w-3.5" />
-                  Enable Smart Filters
-                </label>
-                <p className="text-xs text-muted-foreground">
-                  Excludes icons, symbols, numbers, and exact duplicates. Disable this if you're missing expected texts.
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* OpenAI API Key */}
-        <Card>
-          <CardHeader>
-            <CardTitle>OpenAI API Key (Optional)</CardTitle>
-            <CardDescription>
-              Leave empty to use server-side API key from environment variables
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
             <div className="space-y-2">
-              <Label htmlFor="openai-key">OpenAI API Key</Label>
+              <Label htmlFor="figma-token">Figma API Token (Optional)</Label>
               <Input
-                id="openai-key"
+                id="figma-token"
                 type="password"
-                placeholder="sk-... (optional if configured in .env.local)"
-                value={openaiKey}
-                onChange={(e) => setOpenaiKey(e.target.value)}
+                placeholder="Enter your token for private Figma files"
+                value={figmaToken}
+                onChange={(e) => setFigmaToken(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                If you have set OPENAI_API_KEY in your .env.local file, you can leave this empty
+                Only needed if your Figma file is private
               </p>
             </div>
+
+            <div className="space-y-3">
+              <div className="flex items-start space-x-2">
+                <Checkbox
+                  id="smart-filters"
+                  checked={enableSmartFilters}
+                  onCheckedChange={(checked) => setEnableSmartFilters(checked === true)}
+                />
+                <div className="grid gap-1.5 leading-none">
+                  <label
+                    htmlFor="smart-filters"
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2"
+                  >
+                    <Filter className="h-3.5 w-3.5" />
+                    Enable Smart Filters
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Excludes icons, symbols, numbers, and exact duplicates. Disable this if you&apos;re missing expected texts.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start space-x-2">
+                <Checkbox
+                  id="nested-keys"
+                  checked={useNestedKeys}
+                  onCheckedChange={(checked) => setUseNestedKeys(checked === true)}
+                />
+                <div className="grid gap-1.5 leading-none">
+                  <label
+                    htmlFor="nested-keys"
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                  >
+                    Group keys by screen name
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Organizes translation keys under screen/frame names (e.g., {`{ "HomeScreen": { "title": "..." } }`})
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-4">
+              <Button
+                onClick={handleExtractTexts}
+                disabled={loading || !enJson || !jpJson || !figmaUrl}
+                size="lg"
+                className="w-full"
+              >
+                {loading && loadingStep === 'figma' ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Extracting Texts from Figma...
+                  </>
+                ) : (
+                  'Extract Texts from Figma'
+                )}
+              </Button>
+            </div>
           </CardContent>
+          )}
         </Card>
 
-        {/* Action Buttons */}
-        <div className="flex justify-center gap-4">
-          {step === 'setup' && (
-            <Button
-              onClick={handleExtractTexts}
-              disabled={loading}
-              size="lg"
-              className="w-full md:w-auto px-12"
-            >
-              {loading ? 'Extracting...' : 'Extract Texts from Figma'}
-            </Button>
-          )}
-
-          {step === 'review' && (
-            <>
-              <Button
-                onClick={handleStartOver}
-                variant="outline"
-                size="lg"
-                className="w-full md:w-auto px-8"
-              >
-                Start Over
-              </Button>
-              {openaiKey && (
-                <Button
-                  onClick={handleGenerateKeys}
-                  disabled={loading}
-                  size="lg"
-                  className="w-full md:w-auto px-12"
-                >
-                  {loading ? 'Generating...' : 'Generate i18n Keys with AI'}
-                </Button>
-              )}
-            </>
-          )}
-
-          {(step === 'generating' || step === 'complete') && (
-            <Button
-              onClick={handleStartOver}
-              variant="outline"
-              size="lg"
-              className="w-full md:w-auto px-12"
-            >
-              Start Over
-            </Button>
-          )}
-        </div>
-
-        {/* Progress */}
-        {loading && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Processing</CardTitle>
-              <CardDescription>{status}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Progress value={progress} className="w-full" />
-
-              {/* Shimmer loading skeletons */}
-              <div className="space-y-3 mt-4">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-3/4" />
-                <Skeleton className="h-4 w-5/6" />
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Stats */}
+        {/* Analysis Results - Show after extraction */}
         {stats && (
           <Card>
-            <CardHeader>
-              <CardTitle>Analysis Results</CardTitle>
+            <CardHeader className="cursor-pointer" onClick={() => toggleSection('analysisResults')}>
+              <div className="flex items-center justify-between">
+                <CardTitle>Analysis Results</CardTitle>
+                {collapsedSections.analysisResults ? (
+                  <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                ) : (
+                  <ChevronUp className="h-5 w-5 text-muted-foreground" />
+                )}
+              </div>
             </CardHeader>
+            {!collapsedSections.analysisResults && (
             <CardContent>
               <div className="grid grid-cols-3 gap-4 text-center">
                 <div>
@@ -602,24 +714,35 @@ function AppContent() {
                 </div>
               )}
             </CardContent>
+            )}
           </Card>
         )}
 
         {/* Extracted Texts Preview */}
         {step === 'review' && extractedTexts.length > 0 && (
           <Card>
-            <CardHeader>
-              <CardTitle>Extracted Texts - Review Before Generating</CardTitle>
-              <CardDescription>
-                These {extractedTexts.length} Japanese texts will be sent to OpenAI for key generation
-              </CardDescription>
+            <CardHeader className="cursor-pointer" onClick={() => toggleSection('extractedTexts')}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Extracted Texts - Review Before Generating</CardTitle>
+                  <CardDescription>
+                    These {extractedTexts.length} Japanese texts will be sent to OpenAI for key generation. Hover over any text to remove it.
+                  </CardDescription>
+                </div>
+                {collapsedSections.extractedTexts ? (
+                  <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                ) : (
+                  <ChevronUp className="h-5 w-5 text-muted-foreground" />
+                )}
+              </div>
             </CardHeader>
+            {!collapsedSections.extractedTexts && (
             <CardContent>
               <div className="max-h-96 overflow-y-auto space-y-3">
                 {extractedTexts.slice(0, 50).map((item, index) => (
                   <div
                     key={index}
-                    className="p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md"
+                    className="group relative p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md hover:border-slate-300 dark:hover:border-slate-600 transition-colors"
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1 min-w-0">
@@ -640,9 +763,20 @@ function AppContent() {
                           {item.text}
                         </p>
                       </div>
-                      <span className="text-xs text-muted-foreground bg-slate-200 dark:bg-slate-800 px-2 py-1 rounded">
-                        #{index + 1}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground bg-slate-200 dark:bg-slate-800 px-2 py-1 rounded">
+                          #{index + 1}
+                        </span>
+                        <Button
+                          onClick={() => handleRemoveText(index)}
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100 dark:hover:bg-red-950 hover:text-red-600 dark:hover:text-red-400"
+                          title="Remove this text"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -653,6 +787,7 @@ function AppContent() {
                 )}
               </div>
             </CardContent>
+            )}
           </Card>
         )}
 
@@ -667,50 +802,147 @@ function AppContent() {
               );
 
               return (
-                <>
-                  <Alert
-                    variant={warning.level === 'danger' ? 'destructive' : 'default'}
-                    className={
-                      warning.level === 'warning'
-                        ? 'border-yellow-500 dark:border-yellow-600'
-                        : ''
-                    }
-                  >
-                    {warning.level === 'danger' ? (
-                      <AlertTriangle className="h-4 w-4" />
-                    ) : warning.level === 'warning' ? (
-                      <Info className="h-4 w-4 text-yellow-600 dark:text-yellow-500" />
-                    ) : (
-                      <Zap className="h-4 w-4" />
-                    )}
-                    <AlertTitle>Estimated Token Usage</AlertTitle>
-                    <AlertDescription>
-                      <div className="mt-2 space-y-1">
-                        <p>{warning.message}</p>
-                        <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
-                          <div>
-                            <strong>Input tokens:</strong> {formatNumber(tokenEstimate.inputTokens)}
-                          </div>
-                          <div>
-                            <strong>Output tokens:</strong>{' '}
-                            {formatNumber(tokenEstimate.estimatedOutputTokens)}
-                          </div>
-                          <div>
-                            <strong>Total estimate:</strong>{' '}
-                            {formatNumber(tokenEstimate.totalEstimate)}
-                          </div>
-                          <div>
-                            <strong>Estimated cost:</strong> ${estimatedCost.toFixed(4)}
+                <Card>
+                  <CardHeader className="cursor-pointer" onClick={() => toggleSection('tokenEstimate')}>
+                    <div className="flex items-center justify-between">
+                      <CardTitle>Estimated Token Usage</CardTitle>
+                      {collapsedSections.tokenEstimate ? (
+                        <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                      ) : (
+                        <ChevronUp className="h-5 w-5 text-muted-foreground" />
+                      )}
+                    </div>
+                  </CardHeader>
+                  {!collapsedSections.tokenEstimate && (
+                  <CardContent>
+                    <Alert
+                      variant={warning.level === 'danger' ? 'destructive' : 'default'}
+                      className={
+                        warning.level === 'warning'
+                          ? 'border-yellow-500 dark:border-yellow-600'
+                          : ''
+                      }
+                    >
+                      {warning.level === 'danger' ? (
+                        <AlertTriangle className="h-4 w-4" />
+                      ) : warning.level === 'warning' ? (
+                        <Info className="h-4 w-4 text-yellow-600 dark:text-yellow-500" />
+                      ) : (
+                        <Zap className="h-4 w-4" />
+                      )}
+                      <AlertTitle>Token Usage Estimate</AlertTitle>
+                      <AlertDescription>
+                        <div className="mt-2 space-y-1">
+                          <p>{warning.message}</p>
+                          <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
+                            <div>
+                              <strong>Input tokens:</strong> {formatNumber(tokenEstimate.inputTokens)}
+                            </div>
+                            <div>
+                              <strong>Output tokens:</strong>{' '}
+                              {formatNumber(tokenEstimate.estimatedOutputTokens)}
+                            </div>
+                            <div>
+                              <strong>Total estimate:</strong>{' '}
+                              {formatNumber(tokenEstimate.totalEstimate)}
+                            </div>
+                            <div>
+                              <strong>Estimated cost:</strong> ${estimatedCost.toFixed(4)}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </AlertDescription>
-                  </Alert>
-                </>
+                      </AlertDescription>
+                    </Alert>
+                  </CardContent>
+                  )}
+                </Card>
               );
             })()}
           </>
         )}
+
+        {/* Step 3: Generate Keys with OpenAI */}
+        <Card className={completedSteps.step3 ? 'border-green-500 bg-green-50 dark:bg-green-950/20' : ''}>
+          <CardHeader className="cursor-pointer" onClick={() => toggleSection('step3')}>
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className={`flex items-center justify-center w-10 h-10 rounded-full font-bold ${
+                  completedSteps.step3
+                    ? 'bg-green-500 text-white'
+                    : 'bg-primary text-primary-foreground'
+                }`}>
+                  3
+                </div>
+                {completedSteps.step3 && (
+                  <div className="absolute -top-1 -right-1 bg-white dark:bg-slate-900 rounded-full p-0.5">
+                    <BadgeCheck className="h-4 w-4 text-green-500" />
+                  </div>
+                )}
+              </div>
+              <div className="flex-1">
+                <CardTitle className={completedSteps.step3 ? 'text-green-700 dark:text-green-400' : ''}>
+                  Generate Translation Keys
+                </CardTitle>
+                <CardDescription>
+                  AI will create meaningful, consistent translation keys for each Japanese text found in your design
+                </CardDescription>
+              </div>
+              {collapsedSections.step3 ? (
+                <ChevronDown className="h-5 w-5 text-muted-foreground" />
+              ) : (
+                <ChevronUp className="h-5 w-5 text-muted-foreground" />
+              )}
+            </div>
+          </CardHeader>
+          {!collapsedSections.step3 && (
+          <CardContent>
+            <div className="space-y-2">
+              <Label htmlFor="openai-key">OpenAI API Key (Optional)</Label>
+              <Input
+                id="openai-key"
+                type="password"
+                placeholder="Enter your OpenAI API key"
+                value={openaiKey}
+                onChange={(e) => setOpenaiKey(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Leave blank if you've already configured your key
+              </p>
+            </div>
+
+            {step === 'review' && (
+              <div className="pt-4 space-y-4">
+                <div className="p-4 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                  <div className="flex items-center gap-2 text-green-700 dark:text-green-400 mb-2">
+                    <CheckCircle2 className="h-5 w-5" />
+                    <span className="font-semibold">Ready to Generate!</span>
+                  </div>
+                  <p className="text-sm text-green-600 dark:text-green-500">
+                    Found {extractedTexts.length} new Japanese texts that need translation keys
+                  </p>
+                </div>
+                <Button
+                  onClick={handleGenerateKeys}
+                  disabled={loading}
+                  size="lg"
+                  className="w-full"
+                >
+                  {loading && loadingStep === 'generating' ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Generating i18n Keys with AI...
+                    </>
+                  ) : (
+                    'Generate i18n Keys with AI'
+                  )}
+                </Button>
+              </div>
+            )}
+
+          </CardContent>
+          )}
+        </Card>
+
 
         {/* Actual Token Usage */}
         {actualTokenUsage && (
@@ -767,11 +999,28 @@ function AppContent() {
 
         {/* Generated Keys */}
         {generatedKeys && (
-          <JsonViewer
-            json={generatedKeys}
-            title="Generated i18n Keys"
-            description="Copy or download the generated keys to use in your project"
-          />
+          <>
+            <JsonViewer
+              json={generatedKeys}
+              title="Generated i18n Keys"
+              description="Copy or download the generated keys to use in your project"
+            />
+            <Card>
+              <CardContent className="pt-6">
+                <Button
+                  onClick={handleStartOver}
+                  variant="outline"
+                  size="lg"
+                  className="w-full"
+                >
+                  Process Another Figma File
+                </Button>
+                <p className="text-xs text-muted-foreground text-center mt-2">
+                  Your localization files will be preserved
+                </p>
+              </CardContent>
+            </Card>
+          </>
         )}
       </div>
     </div>

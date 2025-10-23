@@ -9,6 +9,7 @@ import {
 import { filterJapaneseText } from '@/lib/utils/language';
 import { filterNewTexts, getSampleContext } from '@/lib/utils/json-compare';
 import { estimateBatchTokens } from '@/lib/utils/token-estimator';
+import { extractAllKeys } from '@/lib/utils/openai';
 import { filterTextNodes, getFilteringSummary } from '@/lib/utils/text-filters';
 import { I18nJson } from '@/lib/types';
 
@@ -108,8 +109,11 @@ export async function POST(request: NextRequest) {
     // Get context sample for AI
     const contextSample = getSampleContext(parsedJpJson, 5);
 
-    // Estimate token usage
-    const tokenEstimate = estimateBatchTokens(newNodes, contextSample);
+    // Extract existing keys for more accurate token estimation
+    const existingKeys = extractAllKeys(parsedJpJson);
+
+    // Estimate token usage with existing keys for better accuracy
+    const tokenEstimate = estimateBatchTokens(newNodes, contextSample, existingKeys, 10);
 
     return NextResponse.json({
       success: true,
