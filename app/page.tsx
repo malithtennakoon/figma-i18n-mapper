@@ -253,6 +253,9 @@ function AppContent() {
       return;
     }
 
+    // Ensure Step 3 stays uncollapsed during generation
+    setCollapsedSections((prev) => ({ ...prev, step3: false }));
+
     setLoading(true);
     setLoadingStep('generating');
     setError('');
@@ -927,14 +930,20 @@ function AppContent() {
                   size="lg"
                   className="w-full"
                 >
-                  {loading && loadingStep === 'generating' ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Generating i18n Keys with AI...
-                    </>
-                  ) : (
-                    'Generate i18n Keys with AI'
-                  )}
+                  Generate i18n Keys with AI
+                </Button>
+              </div>
+            )}
+
+            {step === 'generating' && (
+              <div className="pt-4">
+                <Button
+                  disabled
+                  size="lg"
+                  className="w-full"
+                >
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Generating i18n Keys with AI...
                 </Button>
               </div>
             )}
