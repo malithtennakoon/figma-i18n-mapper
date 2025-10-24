@@ -1,11 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateKeysInBatches } from '@/lib/utils/openai';
 import { FigmaTextNode } from '@/lib/types';
+import { logUsage } from '@/lib/db';
+import { estimateCost } from '@/lib/utils/token-estimator';
+import { verifyUserEmail } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { nodes, contextSample, openaiApiKey, existingKeys, useNestedKeys } = body;
+    const { nodes, contextSample, openaiApiKey, existingKeys, useNestedKeys, userEmail, figmaUrl } = body;
+
+    // SECURITY: Verify user is authenticated and in database
+    const authResult = await verifyUserEmail(userEmail);
+    if (!authResult.authenticated) {
+      return NextResponse.json(
+        { error: authResult.error || 'Authentication required' },
+        { status: 401 }
+      );
+    }
 
     if (!nodes || !Array.isArray(nodes) || nodes.length === 0) {
       return NextResponse.json(
@@ -40,6 +52,30 @@ export async function POST(request: NextRequest) {
       10, // batch size
       useNestedKeys || false // nested keys preference
     );
+
+    // Log usage to database if userEmail is provided
+    if (userEmail && figmaUrl && result.tokenUsage) {
+      try {
+        const cost = estimateCost(
+          result.tokenUsage.promptTokens,
+          result.tokenUsage.completionTokens
+        );
+
+        await logUsage({
+          userEmail,
+          figmaUrl,
+          extractedTextsCount: nodes.length,
+          extractedTextsSample: nodes,
+          promptTokens: result.tokenUsage.promptTokens,
+          completionTokens: result.tokenUsage.completionTokens,
+          totalTokens: result.tokenUsage.totalTokens,
+          cost,
+        });
+      } catch (logError) {
+        // Log the error but don't fail the request
+        console.error('Error logging usage:', logError);
+      }
+    }
 
     return NextResponse.json({
       success: true,

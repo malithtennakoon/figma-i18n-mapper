@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { FileUpload } from '@/components/custom/file-upload';
 import { JsonViewer } from '@/components/custom/json-viewer';
 import { ThemeToggle } from '@/components/custom/theme-toggle';
+import { EmailAuthModal } from '@/components/custom/email-auth-modal';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,9 +19,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { AlertTriangle, Info, Zap, Filter, CheckCircle2, ChevronDown, ChevronUp, BadgeCheck, Loader2, X } from 'lucide-react';
+import { AlertTriangle, Info, Zap, Filter, CheckCircle2, ChevronDown, ChevronUp, BadgeCheck, Loader2, X, User, BarChart3 } from 'lucide-react';
 import { I18nJson } from '@/lib/types';
 import { getTokenWarningLevel, formatNumber, estimateCost, estimateBatchTokens } from '@/lib/utils/token-estimator';
+import Link from 'next/link';
 
 const queryClient = new QueryClient();
 
@@ -39,6 +41,9 @@ function extractAllKeys(obj: any, prefix = ''): string[] {
 }
 
 function AppContent() {
+  const [userEmail, setUserEmail] = useState<string>('');
+  const [userRole, setUserRole] = useState<string>('');
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [enJson, setEnJson] = useState<string>('');
   const [jpJson, setJpJson] = useState<string>('');
   const [figmaUrl, setFigmaUrl] = useState<string>('');
@@ -98,6 +103,18 @@ function AppContent() {
     step3: false,
   });
 
+  // Restore authentication state from localStorage on mount
+  useEffect(() => {
+    const storedEmail = localStorage.getItem('userEmail');
+    const storedRole = localStorage.getItem('userRole');
+
+    if (storedEmail && storedRole) {
+      setUserEmail(storedEmail);
+      setUserRole(storedRole);
+      setIsAuthenticated(true);
+    }
+  }, []);
+
   // Fetch files from Localazy
   const handleFetchFromLocalazy = async () => {
     setLoading(true);
@@ -105,7 +122,7 @@ function AppContent() {
     setError('');
 
     try {
-      const response = await fetch('/api/localazy');
+      const response = await fetch(`/api/localazy?userEmail=${encodeURIComponent(userEmail)}`);
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -164,6 +181,7 @@ function AppContent() {
           onlyVisible: true,
           enableSmartFilters,
           figmaToken: figmaToken || undefined, // Optional, uses env if not provided
+          userEmail, // Required for authentication
         }),
       });
 
@@ -276,6 +294,8 @@ function AppContent() {
           openaiApiKey: openaiKey || undefined, // Optional, uses env if not provided
           existingKeys, // Pass existing keys to avoid duplicates
           useNestedKeys, // Pass nested keys preference
+          userEmail, // Pass user email for usage tracking
+          figmaUrl, // Pass Figma URL for usage tracking
         }),
       });
 
@@ -382,21 +402,65 @@ function AppContent() {
     }));
   };
 
+  const handleAuthenticated = (email: string, role: string) => {
+    setUserEmail(email);
+    setUserRole(role);
+    setIsAuthenticated(true);
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 py-8 px-4">
-      <div className="max-w-6xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex-1 text-center space-y-2">
-            <h1 className="text-4xl font-bold tracking-tight">Figma i18n Key Mapper</h1>
-            <p className="text-muted-foreground">
-              Follow these 3 simple steps to generate i18n keys from your Figma designs
-            </p>
+    <>
+      {/* Email Authentication Modal */}
+      <EmailAuthModal onAuthenticated={handleAuthenticated} />
+
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 py-8 px-4">
+        <div className="max-w-6xl mx-auto space-y-6">
+          {/* Header */}
+          <div className="space-y-4">
+            {/* Top Bar - User Info and Theme Toggle */}
+            <div className="flex items-center justify-end gap-2 flex-wrap">
+              {isAuthenticated && (
+                <>
+                  <Link href="/usage">
+                    <Button variant="outline" size="sm" className="text-xs sm:text-sm">
+                      <BarChart3 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                      <span className="hidden sm:inline">My Usage</span>
+                      <span className="sm:hidden">Usage</span>
+                    </Button>
+                  </Link>
+                  {userRole === 'admin' && (
+                    <Link href="/admin/users">
+                      <Button variant="default" size="sm" className="text-xs sm:text-sm">
+                        <User className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                        <span className="hidden sm:inline">Admin Panel</span>
+                        <span className="sm:hidden">Admin</span>
+                      </Button>
+                    </Link>
+                  )}
+                  <div className="flex items-center gap-2 bg-background border rounded-lg px-2 sm:px-3 py-1 sm:py-2 shadow-sm">
+                    <User className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
+                    <span className="text-xs sm:text-sm font-medium max-w-[120px] sm:max-w-none truncate">{userEmail}</span>
+                    {userRole === 'admin' && (
+                      <span className="text-[10px] sm:text-xs bg-primary text-primary-foreground px-1.5 sm:px-2 py-0.5 rounded">
+                        Admin
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
+              <ThemeToggle />
+            </div>
+
+            {/* Title */}
+            <div className="text-center space-y-2">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight">
+                Figma i18n Key Mapper
+              </h1>
+              <p className="text-sm sm:text-base text-muted-foreground px-4">
+                Follow these 3 simple steps to generate i18n keys from your Figma designs
+              </p>
+            </div>
           </div>
-          <div className="absolute right-4 top-4">
-            <ThemeToggle />
-          </div>
-        </div>
 
         {/* Step 1: Localization Files */}
         <Card className={completedSteps.step1 ? 'border-green-500 bg-green-50 dark:bg-green-950/20' : ''}>
@@ -1031,8 +1095,9 @@ function AppContent() {
             </Card>
           </>
         )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

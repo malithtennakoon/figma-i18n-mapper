@@ -12,6 +12,7 @@ import { estimateBatchTokens } from '@/lib/utils/token-estimator';
 import { extractAllKeys } from '@/lib/utils/openai';
 import { filterTextNodes, getFilteringSummary } from '@/lib/utils/text-filters';
 import { I18nJson } from '@/lib/types';
+import { verifyUserEmail } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
   try {
@@ -23,7 +24,17 @@ export async function POST(request: NextRequest) {
       onlyVisible = true,
       enableSmartFilters = true,
       figmaToken, // Optional from UI
+      userEmail, // Required for authentication
     } = body;
+
+    // SECURITY: Verify user is authenticated and in database
+    const authResult = await verifyUserEmail(userEmail);
+    if (!authResult.authenticated) {
+      return NextResponse.json(
+        { error: authResult.error || 'Authentication required' },
+        { status: 401 }
+      );
+    }
 
     if (!figmaUrl) {
       return NextResponse.json(

@@ -1,7 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyUserEmail } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
+    // SECURITY: Verify user is authenticated and in database
+    const searchParams = request.nextUrl.searchParams;
+    const userEmail = searchParams.get('userEmail');
+
+    const authResult = await verifyUserEmail(userEmail);
+    if (!authResult.authenticated) {
+      return NextResponse.json(
+        { error: authResult.error || 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
     const token = process.env.LOCALAZY_API_TOKEN;
 
     if (!token) {

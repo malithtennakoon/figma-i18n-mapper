@@ -52,11 +52,10 @@ export async function fetchFigmaFile(
     }
 
     // If public access fails but we have a token, try with the token
-    const token = apiToken || process.env.NEXT_PUBLIC_FIGMA_API_TOKEN;
-    if (token) {
+    if (apiToken) {
       const privateResponse = await fetch(`https://api.figma.com/v1/files/${fileId}`, {
         headers: {
-          'X-Figma-Token': token,
+          'X-Figma-Token': apiToken,
         },
       });
 
