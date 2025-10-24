@@ -98,7 +98,11 @@ export function EmailAuthModal({ onAuthenticated }: EmailAuthModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={() => {}}>
-      <DialogContent className="sm:max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
+      <DialogContent
+        className="sm:max-w-md"
+        onPointerDownOutside={(e) => e.preventDefault()}
+        showCloseButton={false}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Mail className="h-5 w-5" />
